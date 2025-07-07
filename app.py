@@ -1046,6 +1046,93 @@ elif calculator_type == "Cicilan Properti":
             st.warning(f"Debt-to-Income Ratio: {debt_to_income:.1f}% (Hati-hati)")
         else:
             st.error(f"Debt-to-Income Ratio: {debt_to_income:.1f}% (Berisiko)")
+    
+    # Export functionality for Property/KPR Calculator
+    st.subheader("📥 Export Data")
+    col_export1, col_export2, col_export3 = st.columns(3)
+    
+    # Prepare export data
+    input_params = {
+        'Platform KPR': kpr_platform,
+        'Harga Properti': property_price,
+        'Uang Muka': down_payment,
+        'Uang Muka (%)': down_payment_pct,
+        'Jumlah Pinjaman': loan_amount,
+        'Suku Bunga': interest_rate,
+        'Jenis Bunga': interest_type,
+        'Jangka Waktu': loan_term,
+        'Biaya Notaris': notary_fee,
+        'Penghasilan Bulanan': monthly_income
+    }
+    
+    if interest_type == "Fixed":
+        results = {
+            'Jumlah Pinjaman': loan_amount,
+            'Cicilan Bulanan': monthly_payment,
+            'Total Pembayaran': total_payment,
+            'Total Bunga': total_interest,
+            'Total Biaya': total_cost,
+            'Debt-to-Income Ratio': f"{debt_to_income:.1f}%"
+        }
+        
+        # Create KPR schedule
+        kpr_schedule = generate_amortization_schedule(loan_amount, interest_rate, loan_term)
+    else:
+        # Floating rate results
+        results = {
+            'Jumlah Pinjaman': loan_amount,
+            'Cicilan Awal (Tahun 1-3)': monthly_payment_1,
+            'Cicilan Setelah Tahun 3': monthly_payment_2,
+            'Total Pembayaran': total_payment,
+            'Total Bunga': total_interest,
+            'Total Biaya': total_cost,
+            'Debt-to-Income Ratio': f"{debt_to_income:.1f}%"
+        }
+        
+        # Create floating rate schedule combining both periods
+        kpr_schedule_1 = generate_amortization_schedule(loan_amount, interest_rate, rate_change_year)
+        kpr_schedule_2 = generate_amortization_schedule(remaining_balance, new_rate, remaining_years)
+        kpr_schedule_2['Bulan'] = kpr_schedule_2['Bulan'] + (rate_change_year * 12)
+        kpr_schedule = pd.concat([kpr_schedule_1, kpr_schedule_2], ignore_index=True)
+    
+    # Add cost breakdown
+    cost_breakdown = pd.DataFrame({
+        'Komponen': ['Harga Properti', 'Uang Muka', 'Jumlah Pinjaman', 'Total Bunga', 'Biaya Notaris', 'Pajak/Biaya Lain', 'Total Biaya'],
+        'Nilai': [property_price, down_payment, loan_amount, total_interest, notary_fee, tax_fee, total_cost]
+    })
+    
+    export_data = create_export_data("Cicilan Properti/KPR", input_params, results, kpr_schedule)
+    export_data['cost_breakdown'] = cost_breakdown.to_dict('records')
+    
+    with col_export1:
+        # CSV Export
+        csv_data = export_to_csv(kpr_schedule, "kpr_schedule.csv")
+        st.download_button(
+            label="📄 Download CSV",
+            data=csv_data,
+            file_name=f"kpr_cicilan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    
+    with col_export2:
+        # Excel Export
+        excel_data = export_to_excel(export_data, "kpr_analysis.xlsx")
+        st.download_button(
+            label="📊 Download Excel",
+            data=excel_data,
+            file_name=f"kpr_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    with col_export3:
+        # Summary Report
+        summary_report = create_summary_report("Cicilan Properti/KPR", input_params, results)
+        st.download_button(
+            label="📋 Download Report",
+            data=summary_report,
+            file_name=f"kpr_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            mime="text/plain"
+        )
 
 elif calculator_type == "Pinjaman Online/Fintech":
     st.header("💳 Kalkulator Pinjaman Online/Fintech")
@@ -1238,6 +1325,84 @@ elif calculator_type == "Pinjaman Online/Fintech":
             df_comparison[col] = df_comparison[col].apply(format_currency)
         
         st.dataframe(df_comparison, use_container_width=True)
+    
+    # Export functionality for Pinjaman Online/Fintech Calculator
+    st.subheader("📥 Export Data")
+    col_export1, col_export2, col_export3 = st.columns(3)
+    
+    # Prepare export data
+    input_params = {
+        'Platform Pinjol': pinjol_platform,
+        'Jumlah Pinjaman': loan_amount,
+        'Tenor': loan_term_months,
+        'Suku Bunga Bulanan': monthly_rate,
+        'Biaya Admin': admin_fee
+    }
+    
+    results = {
+        'Cicilan per Bulan': total_monthly_payment,
+        'Total Pembayaran': total_payment,
+        'Total Bunga & Biaya': total_interest,
+        'APR (Tahunan)': f"{apr:.1f}%",
+        'Perbandingan dengan Kartu Kredit': format_currency(cc_total - total_payment),
+        'Perbandingan dengan Bank': format_currency(bank_total - total_payment)
+    }
+    
+    # Create payment schedule
+    payment_schedule = []
+    remaining_balance = loan_amount
+    
+    for month in range(1, loan_term_months + 1):
+        principal_payment = loan_amount / loan_term_months
+        interest_payment = remaining_balance * monthly_rate / 100
+        total_payment_month = principal_payment + interest_payment
+        remaining_balance -= principal_payment
+        
+        payment_schedule.append({
+            'Bulan': month,
+            'Cicilan_Pokok': principal_payment,
+            'Cicilan_Bunga': interest_payment,
+            'Total_Cicilan': total_payment_month,
+            'Sisa_Pinjaman': max(0, remaining_balance)
+        })
+    
+    schedule_df = pd.DataFrame(payment_schedule)
+    
+    # Add comparison data
+    comparison_df = df_comparison.copy()
+    
+    export_data = create_export_data("Pinjaman Online/Fintech", input_params, results, schedule_df)
+    export_data['platform_comparison'] = comparison_df.to_dict('records')
+    
+    with col_export1:
+        # CSV Export
+        csv_data = export_to_csv(schedule_df, "pinjol_schedule.csv")
+        st.download_button(
+            label="📄 Download CSV",
+            data=csv_data,
+            file_name=f"pinjol_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    
+    with col_export2:
+        # Excel Export
+        excel_data = export_to_excel(export_data, "pinjol_analysis.xlsx")
+        st.download_button(
+            label="📊 Download Excel",
+            data=excel_data,
+            file_name=f"pinjol_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    with col_export3:
+        # Summary Report
+        summary_report = create_summary_report("Pinjaman Online/Fintech", input_params, results)
+        st.download_button(
+            label="📋 Download Report",
+            data=summary_report,
+            file_name=f"pinjol_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            mime="text/plain"
+        )
 
 elif calculator_type == "Perbandingan Skenario":
     st.header("⚖️ Perbandingan Multiple Skenario")
@@ -1346,6 +1511,66 @@ elif calculator_type == "Perbandingan Skenario":
                   title='Perbandingan Total Bunga',
                   color='Skenario')
     st.plotly_chart(fig2, use_container_width=True)
+    
+    # Export functionality for Scenario Comparison
+    st.subheader("📥 Export Data")
+    col_export1, col_export2, col_export3 = st.columns(3)
+    
+    # Prepare export data
+    input_params = {
+        'Jumlah Skenario': len(scenarios),
+        'Skenario 1 - Pinjaman': amount_1,
+        'Skenario 1 - Bunga': rate_1,
+        'Skenario 1 - Jangka Waktu': term_1,
+        'Skenario 2 - Pinjaman': amount_2,
+        'Skenario 2 - Bunga': rate_2,
+        'Skenario 2 - Jangka Waktu': term_2,
+        'Skenario 3 - Pinjaman': amount_3,
+        'Skenario 3 - Bunga': rate_3,
+        'Skenario 3 - Jangka Waktu': term_3
+    }
+    
+    results = {
+        'Skenario Terbaik (Cicilan Terendah)': df_comparison.loc[df_comparison['Cicilan_Bulanan'].idxmin(), 'Skenario'],
+        'Skenario Terbaik (Total Bunga Terendah)': df_comparison.loc[df_comparison['Total_Bunga'].idxmin(), 'Skenario'],
+        'Selisih Cicilan (Max-Min)': format_currency(df_comparison['Cicilan_Bulanan'].max() - df_comparison['Cicilan_Bulanan'].min()),
+        'Selisih Total Bunga (Max-Min)': format_currency(df_comparison['Total_Bunga'].max() - df_comparison['Total_Bunga'].min())
+    }
+    
+    # Create detailed comparison data
+    comparison_detailed = pd.DataFrame(scenarios)
+    
+    export_data = create_export_data("Perbandingan Skenario", input_params, results, comparison_detailed)
+    
+    with col_export1:
+        # CSV Export
+        csv_data = export_to_csv(comparison_detailed, "scenario_comparison.csv")
+        st.download_button(
+            label="📄 Download CSV",
+            data=csv_data,
+            file_name=f"perbandingan_skenario_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    
+    with col_export2:
+        # Excel Export
+        excel_data = export_to_excel(export_data, "scenario_analysis.xlsx")
+        st.download_button(
+            label="📊 Download Excel",
+            data=excel_data,
+            file_name=f"perbandingan_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    with col_export3:
+        # Summary Report
+        summary_report = create_summary_report("Perbandingan Skenario", input_params, results)
+        st.download_button(
+            label="📋 Download Report",
+            data=summary_report,
+            file_name=f"perbandingan_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            mime="text/plain"
+        )
 
 # Footer
 st.markdown("---")
